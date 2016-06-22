@@ -7,6 +7,7 @@
 //
 
 import UIKit
+import GameplayKit
 import SceneKit
 
 class GameViewController: UIViewController {
@@ -18,62 +19,50 @@ class GameViewController: UIViewController {
         return node
     }()
     
-    var bashedCans = 0
+    lazy var velocityRecognizer: UIPanGestureRecognizer = {
+        return UIPanGestureRecognizer(
+            target: self,
+            action: #selector(GameViewController.handlePan(_:))
+        )
+    }()
+    
+    var currentLevel = 0
     var bashedCanNames = [String]()
-    var currentLevel = 1
+    
     var canNodes = [SCNNode]()
+    var ballNodes = [SCNNode]()
+    
     var mainCameraNode: SCNNode!
     var ballNode: SCNNode!
-    var tableTopNode: SCNNode!
+    var ballShelfNode: SCNNode!
+    var canShelfNode: SCNNode!
     
-    var firstTouchTime: NSTimeInterval = 0
+    let startingCameraPosition = SCNVector3(x: -10, y: 5.8, z: 2.75)
+    let gameplayCameraPosition = SCNVector3(x: 0, y: 1.25, z: 8)
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
         createScene()
         resetCans()
-    }
-    
-    override func touchesBegan(touches: Set<UITouch>, withEvent event: UIEvent?) {
-        super.touchesEnded(touches, withEvent: event)
-        
-        ballNode.physicsBody = nil
-        firstTouchTime = NSDate().timeIntervalSince1970
-        
-        guard let firstTouch = touches.first else { return }
-        positionBallFromTouch(firstTouch)
-    }
-    
-    override func touchesMoved(touches: Set<UITouch>, withEvent event: UIEvent?) {
-        super.touchesMoved(touches, withEvent: event)
-        
-        guard let firstTouch = touches.first else { return }
-        positionBallFromTouch(firstTouch)
-    }
-    
-    override func touchesEnded(touches: Set<UITouch>, withEvent event: UIEvent?) {
-        super.touchesEnded(touches, withEvent: event)
-        
-        let ballPhysicsBody = SCNPhysicsBody(
-            type: .Dynamic,
-            shape: SCNPhysicsShape(geometry: SCNSphere(radius: 0.25), options: nil)
-        )
-        ballPhysicsBody.mass = 3
-        ballNode.physicsBody = ballPhysicsBody
-        
-        let timeDiff = Float(NSDate().timeIntervalSince1970 - firstTouchTime)
-        
-        let impulseVector = SCNVector3(x: 0, y: 1/(timeDiff * Float(M_PI)), z: -3 / timeDiff)
-        ballNode.physicsBody?.applyForce(impulseVector, impulse: true)
-        
-        firstTouchTime = 0
+        resetCamera()
     }
     
     // MARK: - Helpers
     
+    func resetCamera() {
+        mainCameraNode.position = startingCameraPosition
+        
+        let waitAction = SCNAction.waitForDuration(3.0)
+        let moveAction = SCNAction.moveTo(gameplayCameraPosition, duration: 0.6)
+        let groupAction = SCNAction.sequence([waitAction, moveAction])
+        mainCameraNode.runAction(groupAction)
+    }
+    
     func resetCans() {
         guard let scnView = view as? SCNView, levelScene = scnView.scene else { return }
+        guard let canScene = SCNScene(named: "resources.scnassets/Can.scn") else { return }
+        guard let baseCanNode = canScene.rootNode.childNodeWithName("can", recursively: true) else { return }
         
         for canNode in canNodes {
             canNode.removeFromParentNode()
@@ -81,20 +70,28 @@ class GameViewController: UIViewController {
         canNodes.removeAll()
         
         for idx in 0..<3 {
-            let canShape = SCNCylinder(radius: 0.15, height: 0.45)
-            let canNode = SCNNode(geometry: canShape)
+            let canNode = baseCanNode.copy() as! SCNNode
+            canNode.eulerAngles = SCNVector3(
+                x: 0,
+                y: GKRandomSource.sharedRandom().nextUniform(),
+                z: 0
+            )
             canNode.name = "Can #\(idx)"
             
             let canPhysicsBody = SCNPhysicsBody(
                 type: .Dynamic,
-                shape: SCNPhysicsShape(geometry: canShape, options: nil)
+                shape: SCNPhysicsShape(geometry: canNode.geometry!, options: nil)
             )
             canPhysicsBody.mass = 0.75
             canPhysicsBody.contactTestBitMask = 1
             canNode.physicsBody = canPhysicsBody
             
-            let xOffset = 1.125 + tableTopNode.position.x - (Float(idx) * 1.125)
-            canNode.position = SCNVector3(x: xOffset, y: tableTopNode.position.y + 0.5, z: 2)
+            let xOffset = 1.125 + canShelfNode.position.x - (Float(idx) * 1.125)
+            canNode.position = SCNVector3(
+                x: xOffset,
+                y: canShelfNode.position.y + 0.5,
+                z: canShelfNode.position.z
+            )
             levelScene.rootNode.addChildNode(canNode)
             
             canNodes.append(canNode)
@@ -104,37 +101,81 @@ class GameViewController: UIViewController {
     func createScene() {
         let levelScene = SCNScene(named: "resources.scnassets/Level.scn")!
         levelScene.physicsWorld.contactDelegate = self
-        mainCameraNode = levelScene.rootNode.childNodeWithName("Main Camera", recursively: true)!
+        mainCameraNode = levelScene.rootNode.childNodeWithName("main-camera", recursively: true)!
         
-        ballNode = levelScene.rootNode.childNodeWithName("Ball reference", recursively: true)!
+        ballNode = levelScene.rootNode.childNodeWithName("ball", recursively: true)!
+        let ballPhysicsBody = SCNPhysicsBody(
+            type: .Dynamic,
+            shape: SCNPhysicsShape(geometry: SCNSphere(radius: 0.25), options: nil)
+        )
+        ballPhysicsBody.mass = 3
+        ballPhysicsBody.friction = 2
+        ballNode.physicsBody = ballPhysicsBody
+        ballNode.physicsBody?.applyForce(SCNVector3(x: 1.85, y: 0, z: 0), impulse: true)
+        
+        canShelfNode = levelScene.rootNode.childNodeWithName("can-shelf", recursively: true)!
+        let canShelfPhysicsBody = SCNPhysicsBody(
+            type: .Static,
+            shape: SCNPhysicsShape(geometry: canShelfNode.geometry!, options: nil)
+        )
+        canShelfPhysicsBody.affectedByGravity = false
+        canShelfNode.physicsBody = canShelfPhysicsBody
+        
         levelScene.rootNode.addChildNode(touchCatchingPlaneNode)
-        touchCatchingPlaneNode.position = SCNVector3(x: 0, y: 0, z: ballNode.position.z)
+        touchCatchingPlaneNode.position = SCNVector3(x: 0, y: 0, z: canShelfNode.position.z)
         touchCatchingPlaneNode.eulerAngles = mainCameraNode.eulerAngles
-        
-        let table = levelScene.rootNode.childNodeWithName("Table", recursively: true)!
-        tableTopNode = table.childNodeWithName("Top", recursively: true)!
-        let tableTopPhysicsShape = SCNPhysicsShape(node: tableTopNode, options: [SCNPhysicsShapeTypeKey: SCNPhysicsShapeTypeBoundingBox])
-        let tableTopPhysicsBody = SCNPhysicsBody(type: .Static, shape: tableTopPhysicsShape)
-        tableTopPhysicsBody.affectedByGravity = false
-        tableTopNode.physicsBody = tableTopPhysicsBody
         
         let scnView = view as! SCNView
         scnView.scene = levelScene
         scnView.backgroundColor = UIColor.blackColor()
+        scnView.addGestureRecognizer(velocityRecognizer)
     }
     
     func positionBallFromTouch(touch: UITouch) {
         guard let sceneKitView = view as? SCNView else { return }
-        let hitTestResult = sceneKitView.hitTest(touch.locationInView(view), options: nil)
-        guard let touchResult = hitTestResult.filter({ $0.node == touchCatchingPlaneNode }).first else {
-            return
-        }
+        let hitTestResult = sceneKitView.hitTest(
+            touch.locationInView(view),
+            options: nil
+        )
+        let firstTouchResult = hitTestResult.filter({
+            $0.node == touchCatchingPlaneNode
+        }).first
+        guard let touchResult = firstTouchResult else { return }
         
         ballNode.position = SCNVector3(
             touchResult.localCoordinates.x,
             touchResult.localCoordinates.y,
-            7.0
+            4.5
         )
+    }
+    
+    func handlePan(gesture: UIPanGestureRecognizer) {
+        if gesture.state == .Ended {
+            guard let sceneKitView = view as? SCNView else { return }
+            
+            let hitTestResult = sceneKitView.hitTest(
+                gesture.locationInView(view),
+                options: nil
+            )
+            
+            let firstTouchResult = hitTestResult.filter({
+                $0.node == touchCatchingPlaneNode
+            }).first
+            
+            guard let touchResult = firstTouchResult else { return }
+            
+            let velocity = gesture.velocityInView(gesture.view)
+            let forwardVelocity = Float(min(abs(velocity.y / 3000), 1.0)) * 3
+            print("Forward velocity: \(forwardVelocity)")
+            
+            let impulseVector = SCNVector3(
+                x: touchResult.localCoordinates.x,
+                y: touchResult.localCoordinates.y * forwardVelocity,
+                z: canShelfNode.position.z * forwardVelocity
+            )
+            
+            ballNode.physicsBody?.applyForce(impulseVector, impulse: true)
+        }
     }
     
     // MARK: - ViewController Overrides
@@ -159,21 +200,19 @@ extension GameViewController: SCNPhysicsContactDelegate {
         print("Node A: \(contact.nodeA.name). Node B: \(contact.nodeB.name)")
         
         var canNodeWithContact: SCNNode?
-        if nodeNameA.containsString("Can") && nodeNameB == "Floor" {
+        if nodeNameA.containsString("Can") && nodeNameB == "floor" {
             canNodeWithContact = contact.nodeA
         }
-        else if nodeNameB.containsString("Can") && nodeNameA == "Floor" {
+        else if nodeNameB.containsString("Can") && nodeNameA == "floor" {
             canNodeWithContact = contact.nodeB
         }
         
         if let bashedCan = canNodeWithContact {
             bashedCanNames.append(bashedCan.name!)
-            bashedCans += 1
         }
         
-        if bashedCans == canNodes.count {
+        if bashedCanNames.count == canNodes.count {
             resetCans()
-            bashedCans = 0
             bashedCanNames.removeAll()
         }
     }
