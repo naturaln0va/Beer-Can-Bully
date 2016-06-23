@@ -17,9 +17,9 @@
 
 /* Begin PBXFileReference section */
 		48DCDEBD1D0354EF00E805E4 /* Beer Can Bully.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Beer Can Bully.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		48DCDEC01D0354EF00E805E4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		48DCDEC01D0354EF00E805E4 /* AppDelegate.swift */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; tabWidth = 2; wrapsLines = 1; };
 		48DCDEC21D0354EF00E805E4 /* resources.scnassets */ = {isa = PBXFileReference; lastKnownFileType = wrapper.scnassets; path = resources.scnassets; sourceTree = "<group>"; };
-		48DCDEC41D0354EF00E805E4 /* GameViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameViewController.swift; sourceTree = "<group>"; };
+		48DCDEC41D0354EF00E805E4 /* GameViewController.swift */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = sourcecode.swift; path = GameViewController.swift; sourceTree = "<group>"; tabWidth = 2; wrapsLines = 1; };
 		48DCDEC71D0354EF00E805E4 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		48DCDEC91D0354EF00E805E4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		48DCDECC1D0354EF00E805E4 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
