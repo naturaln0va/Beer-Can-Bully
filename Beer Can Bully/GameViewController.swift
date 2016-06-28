@@ -23,12 +23,39 @@ class GameViewController: UIViewController {
     node.castsShadow = false
     return node
   }()
-  // Gesture to calculate the velocity of a swipe
-  lazy var velocityRecognizer: UIPanGestureRecognizer = {
-    return UIPanGestureRecognizer(
-      target: self,
-      action: #selector(GameViewController.handlePan(_:))
-    )
+  
+  // Audio sources
+  lazy var whooshAudioSource: SCNAudioSource = {
+    let source = SCNAudioSource(fileNamed: "sounds/whoosh.aiff")!
+    
+    source.positional = false
+    source.volume = 0.15
+    
+    return source
+  }()
+  lazy var ballCanAudioSource: SCNAudioSource = {
+    let source = SCNAudioSource(fileNamed: "sounds/ball_can.aiff")!
+    
+    source.positional = true
+    source.volume = 0.6
+    
+    return source
+  }()
+  lazy var ballFloorAudioSource: SCNAudioSource = {
+    let source = SCNAudioSource(fileNamed: "sounds/ball_floor.aiff")!
+    
+    source.positional = true
+    source.volume = 0.6
+    
+    return source
+  }()
+  lazy var canFloorAudioSource: SCNAudioSource = {
+    let source = SCNAudioSource(fileNamed: "sounds/can_floor.aiff")!
+    
+    source.positional = true
+    source.volume = 0.6
+    
+    return source
   }()
   
   var scnView: SCNView {
@@ -39,7 +66,6 @@ class GameViewController: UIViewController {
     }
     
     scnView.backgroundColor = UIColor.blackColor()
-    scnView.addGestureRecognizer(self.velocityRecognizer)
     
     return scnView
   }
@@ -62,6 +88,10 @@ class GameViewController: UIViewController {
     }
   }
   
+  var isThrowing: Bool {
+    return startTouch != nil
+  }
+  
   // Game state
   enum GameStateType {
     case TapToPlay
@@ -76,6 +106,8 @@ class GameViewController: UIViewController {
   // Maximum number of ball attempts
   let maxBallNodes = 5
   let gameEndActionKey = "game_end"
+  let ballCanCollisionAudioKey = "ball_hit_can"
+  let ballFloorCollisionAudioKey = "ball_hit_floor"
   
   var currentLevel = 0
   var levels = [GameLevel]()
@@ -84,6 +116,12 @@ class GameViewController: UIViewController {
   var canNodes = [SCNNode]()
   var ballNodes = [SCNNode]()
   var bashedCanNames = [String]()
+  
+  // Ball throwing mechanics
+  var startTouchTime: NSTimeInterval!
+  var endTouchTime: NSTimeInterval!
+  var startTouch: UITouch?
+  var endTouch: UITouch?
   
   // Scene references
   var menuScene = SCNScene(named: "resources.scnassets/Menu.scn")!
@@ -103,11 +141,25 @@ class GameViewController: UIViewController {
     super.viewDidLoad()
     
     loadMenu()
+    loadAudio()
     createScene()
     createHud()
   }
   
   // MARK: - Helpers
+  
+  func loadAudio() {
+    let sources = [
+      whooshAudioSource,
+      ballCanAudioSource,
+      ballFloorAudioSource, 
+      canFloorAudioSource
+    ]
+    
+    for source in sources {
+      source.load()
+    }
+  }
   
   func loadMenu() {
     let scoreNode = menuScene.rootNode.childNodeWithName("score", recursively: true)!
@@ -346,46 +398,51 @@ class GameViewController: UIViewController {
     )
     ballPhysicsBody.mass = 3
     ballPhysicsBody.friction = 2
+    ballPhysicsBody.contactTestBitMask = 1
     ballNode.physicsBody = ballPhysicsBody
-    ballNode.physicsBody?.applyForce(SCNVector3(x: 1.75, y: 0, z: 0), impulse: true)
+    ballNode.physicsBody?.applyForce(SCNVector3(x: 0.8, y: 0, z: 0), impulse: true)
     
     // Keep track of the current ball
     currentBallNode = ballNode
     levelScene.rootNode.addChildNode(ballNode)
   }
   
-  func handlePan(gesture: UIPanGestureRecognizer) {
-    guard gesture.state == .Ended else { return }
-    
+  func throwBall() {
     guard let ballNode = currentBallNode else { return }
     guard let sceneKitView = view as? SCNView else { return }
+    guard let endingTouch = endTouch else { return }
     
-    let hitTestResult = sceneKitView.hitTest(
-      gesture.locationInView(view),
+    let firstTouchResult = sceneKitView.hitTest(
+      endingTouch.locationInView(view),
       options: nil
-    )
-    
-    // Get the touch catching node
-    let firstTouchResult = hitTestResult.filter({
+    ).filter({
       $0.node == touchCatchingPlaneNode
     }).first
     
     guard let touchResult = firstTouchResult else { return }
     
+    levelScene.rootNode.runAction(SCNAction.playAudioSource(whooshAudioSource, waitForCompletion: false))
+    
     // Calculate the velocity of the flick
-    let velocity = gesture.velocityInView(gesture.view)
-    let forwardVelocity = Float(min(max(abs(velocity.y), 900) / 1500, 1.0))
+    let timeDifference = endTouchTime - startTouchTime
+    let velocityComponent = Float(min(max(1 - timeDifference, 0.1), 1.0))
     
     // Create the impulse to push the ball
     let impulseVector = SCNVector3(
       x: touchResult.localCoordinates.x,
-      y: touchResult.localCoordinates.y * (forwardVelocity * 2.5),
-      z: canShelfNode.position.z * (forwardVelocity * 6)
+      y: touchResult.localCoordinates.y * velocityComponent * 3,
+      z: canShelfNode.position.z * velocityComponent * 15
     )
     
     ballNode.physicsBody?.applyForce(impulseVector, impulse: true)
     ballNodes.append(ballNode)
+    
     currentBallNode = nil
+    startTouchTime = nil
+    endTouchTime = nil
+    startTouch = nil
+    endTouch = nil
+    
     refreshLabel()
     
     if ballNodes.count == maxBallNodes {
@@ -394,6 +451,7 @@ class GameViewController: UIViewController {
       let blockAction = SCNAction.runBlock({ _ in
         self.resetLevel()
         self.ballNodes.removeAll()
+        self.currentLevel = 0
         self.score = 0
         self.refreshLabel()
         self.loadMenu()
@@ -414,9 +472,32 @@ class GameViewController: UIViewController {
   // MARK: - Touches
   
   override func touchesBegan(touches: Set<UITouch>, withEvent event: UIEvent?) {
+    super.touchesBegan(touches, withEvent: event)
     if state == .TapToPlay {
       loadLevel()
     }
+    else {
+      guard let firstTouch = touches.first else { return }
+      
+      // Location of the touch in the view
+      let point = firstTouch.locationInView(scnView)
+      let hitResults = scnView.hitTest(point, options: nil)
+
+      // If the touch is on the ball then hold onto that touch
+      if let ball = hitResults.first?.node where ball == currentBallNode {
+        startTouch = touches.first
+        startTouchTime = NSDate().timeIntervalSince1970
+      }
+    }
+  }
+  
+  override func touchesEnded(touches: Set<UITouch>, withEvent event: UIEvent?) {
+    super.touchesEnded(touches, withEvent: event)
+    guard isThrowing else { return }
+    
+    endTouch = touches.first
+    endTouchTime = NSDate().timeIntervalSince1970
+    throwBall()
   }
   
   // MARK: - ViewController Overrides
@@ -438,6 +519,45 @@ extension GameViewController: SCNPhysicsContactDelegate {
   func physicsWorld(world: SCNPhysicsWorld, didBeginContact contact: SCNPhysicsContact) {
     guard let nodeNameA = contact.nodeA.name else { return }
     guard let nodeNameB = contact.nodeB.name else { return }
+    
+    // Check if the ball collided with the floor
+    var ballFloorContactNode: SCNNode?
+    if nodeNameA == "ball" && nodeNameB == "floor" {
+      ballFloorContactNode = contact.nodeA
+    } else if nodeNameB == "ball" && nodeNameA == "floor" {
+      ballFloorContactNode = contact.nodeB
+    }
+    
+    if let ballNode = ballFloorContactNode {
+      // Limit the number of ball floor collision sounds
+      guard ballNode.actionForKey(ballFloorCollisionAudioKey) == nil else { return }
+      
+      ballNode.runAction(
+        SCNAction.playAudioSource(ballFloorAudioSource, waitForCompletion: true),
+        forKey: ballFloorCollisionAudioKey
+      )
+      return
+    }
+    
+    // Check if the ball collided with a can
+    var ballCanContactNode: SCNNode?
+    if nodeNameA.containsString("Can") && nodeNameB == "ball" {
+      ballCanContactNode = contact.nodeA
+    } else if nodeNameB.containsString("Can") && nodeNameA == "ball" {
+      ballCanContactNode = contact.nodeB
+    }
+    
+    if let canNode = ballCanContactNode {
+      // Limit the number of ball can collision sounds
+      guard canNode.actionForKey(ballCanCollisionAudioKey) == nil else { return }
+      
+      canNode.runAction(
+        SCNAction.playAudioSource(ballCanAudioSource, waitForCompletion: true),
+        forKey: ballCanCollisionAudioKey
+      )
+      return
+    }
+    
     if bashedCanNames.contains(nodeNameA) || bashedCanNames.contains(nodeNameB) { return }
     
     // Attempt to get a reference to a can node
@@ -450,6 +570,7 @@ extension GameViewController: SCNPhysicsContactDelegate {
     
     // Keep track of the can's name and add to the score
     if let bashedCan = canNodeWithContact {
+      bashedCan.runAction(SCNAction.playAudioSource(canFloorAudioSource, waitForCompletion: false))
       bashedCanNames.append(bashedCan.name!)
       score += 1
     }
